@@ -1,31 +1,33 @@
 module uart_tx
 	#(
 		parameter int unsigned PAYLOAD_BITS = 8,
-		parameter int unsigned STOP_BITS    = 2,
+		parameter int unsigned STOP_BITS    = 1,
+		parameter int unsigned PARITY_EN    = 1,
 		parameter int unsigned BAUD_RATE    = 115_200,
 		parameter int unsigned CLK_FREQ     = 8_000_000
 	)
 	(
-		input		logic						clk,
-		input		logic						tx_reset,	// active-high synchronous reset
-		input		logic						tx_enable,	// 1-cycle strobe when idle
-		input		logic	[PAYLOAD_BITS-1:0]	tx_data,
+		input	logic						clk,
+		input	logic						tx_reset,	// active-high synchronous reset
+		input	logic						tx_enable,	// 1-cycle strobe when idle
+		input	logic	[PAYLOAD_BITS-1:0]	tx_data,
 		output	logic						tx_busy,
 		output	logic						tx_serial
 	);
 
 	localparam int unsigned CLKS_PER_BIT = CLK_FREQ / BAUD_RATE;
 
-	localparam FSM_IDLE		= 2'b00;
-	localparam FSM_START	= 2'b01;
-	localparam FSM_SEND		= 2'b10;
-	localparam FSM_STOP		= 2'b11;
+	localparam FSM_IDLE		= 3'h0;
+	localparam FSM_START	= 3'h1;
+	localparam FSM_SEND		= 3'h2;
+	localparam FSM_PARITY	= 3'h3;
+	localparam FSM_STOP		= 3'h4;
 
 	logic [$clog2(CLKS_PER_BIT)-1:0]	cycle_counter;
 	logic [$clog2(PAYLOAD_BITS)-1:0]	bit_index;
 	logic [$clog2(STOP_BITS)-1:0]		stop_cnt;
 	logic [PAYLOAD_BITS-1:0]			tx_data_buffer;
-	logic [1:0]						fsm_state;
+	logic [2:0]							fsm_state;
 
 	always_ff @(posedge clk) begin
 		if (tx_reset) begin
@@ -82,8 +84,25 @@ module uart_tx
 						end
 						else begin
 							bit_index <= 'b0;
-							fsm_state <= FSM_STOP;
+							if (PARITY_EN) begin
+								fsm_state <= FSM_PARITY;
+							end
+							else begin
+								fsm_state <= FSM_STOP;
+							end
 						end
+					end
+				end
+
+				FSM_PARITY : begin
+					tx_serial <= ^tx_data_buffer; // even parity
+
+					if (cycle_counter < CLKS_PER_BIT-1) begin
+						cycle_counter <= cycle_counter + 1;
+					end
+					else begin
+						cycle_counter <= 'b0;
+						fsm_state <= FSM_STOP;
 					end
 				end
 
